@@ -2,7 +2,7 @@
 
 (provided you have the ELF files with debug info)
 
-Works with single files or with directories. Default is to search for `.debug` files, as I made with for EDK2
+Works with single files or with directories. Default is to search for `.debug` files, as I made this to work with EDK2
 
 ## Requirements
 
