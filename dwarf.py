@@ -1,10 +1,13 @@
 # NOTE(e-kutovoi): Stolen from https://github.com/eliben/pyelftools/blob/master/examples/dwarf_decode_address.py
+from pathlib import Path
 
 from elftools.common.utils import bytes2str
+from elftools.elf.elffile import DWARFInfo
+from elftools.dwarf.lineprogram import LineProgramEntry
 from elftools.dwarf.descriptions import describe_form_class
 
 
-def decode_funcname(dwarfinfo, address):
+def decode_funcname(dwarfinfo: DWARFInfo, address: int) -> str | None:
     # Go over all DIEs in the DWARF information, looking for a subprogram
     # entry with an address range that includes the given address. Note that
     # this simplifies things by disregarding subprograms that may have
@@ -22,6 +25,7 @@ def decode_funcname(dwarfinfo, address):
                     # an offset from DW_AT_low_pc.
                     highpc_attr = DIE.attributes['DW_AT_high_pc']
                     highpc_attr_class = describe_form_class(highpc_attr.form)
+
                     if highpc_attr_class == 'address':
                         highpc = highpc_attr.value
                     elif highpc_attr_class == 'constant':
@@ -32,12 +36,14 @@ def decode_funcname(dwarfinfo, address):
 
                     if lowpc <= address < highpc:
                         return bytes2str(DIE.attributes['DW_AT_name'].value)
+
             except KeyError:
                 continue
+
     return None
 
 
-def decode_file_line(dwarfinfo, address):
+def decode_file_line(dwarfinfo: DWARFInfo, address: int) -> tuple[str | None, int | None]:
     # Go over all the line programs in the DWARF information, looking for
     # one that describes the given address.
     for CU in dwarfinfo.iter_CUs():
@@ -45,16 +51,32 @@ def decode_file_line(dwarfinfo, address):
         lineprog = dwarfinfo.line_program_for_CU(CU)
         delta = 1 if lineprog.header.version < 5 else 0
         prevstate = None
+
         for entry in lineprog.get_entries():
+            entry: LineProgramEntry
+
             # We're interested in those entries where a new state is assigned
             if entry.state is None:
                 continue
+
             # Looking for a range of addresses in two consecutive states that
             # contain the required address.
             if prevstate and prevstate.address <= address < entry.state.address:
-                filename = lineprog['file_entry'][prevstate.file - delta].name
+                file_entry = lineprog['file_entry'][prevstate.file - delta]
+
                 line = prevstate.line
-                return bytes2str(filename), line
+
+                base_name: str = bytes2str(file_entry.name)
+                dir_index: int = file_entry['dir_index']
+
+                if dir_index == 0:
+                    file = base_name
+                else:
+                    directory = bytes2str(lineprog.header['include_directory'][dir_index])
+                    file = str((Path(directory) / base_name).absolute())
+
+                return file, line
+
             if entry.state.end_sequence:
                 # For the state with `end_sequence`, `address` means the address
                 # of the first byte after the target machine instruction
@@ -65,4 +87,5 @@ def decode_file_line(dwarfinfo, address):
                 prevstate = None
             else:
                 prevstate = entry.state
+
     return None, None
